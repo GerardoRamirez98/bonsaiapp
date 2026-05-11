@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Welcome to your Expo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
@@ -48,3 +49,7 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+=======
+# bonsaiapp
+🌱 Aplicación para el cuidado y gestión de bonsáis. Permite registrar árboles, programar recordatorios de riego, poda y fertilización, monitorear condiciones ambientales y llevar seguimiento del crecimiento mediante historial y fotografías. Diseñada para aficionados y expertos en bonsái.
+>>>>>>> 5e99b475a597feb3c15f9ebf4199ca9024bf6565
