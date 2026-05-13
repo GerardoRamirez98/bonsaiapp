@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useMemo, useState } from "react";
 import {
@@ -68,6 +69,7 @@ export default function BonsaiScreen() {
     state.bonsais.find((b) => b.id === state.currentBonsaiId),
   );
   const deletePhotos = useBonsaiStore((state) => state.deletePhotos);
+  const removeBonsai = useBonsaiStore((state) => state.removeBonsai);
   const setHeroPhoto = useBonsaiStore((state) => state.setHeroPhoto);
   const undoLastWatering = useBonsaiStore((state) => state.undoLastWatering);
   const recordWateringEvent = useBonsaiStore(
@@ -223,6 +225,24 @@ export default function BonsaiScreen() {
       temperature: undefined,
       notes: "Registro rápido de sol",
     });
+  };
+
+  const confirmDeleteBonsai = () => {
+    Alert.alert(
+      "Eliminar bonsái",
+      `¿Eliminar "${currentBonsai.nickname}" de tu colección? Esta acción también eliminará sus fotos sincronizadas.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: () => {
+            removeBonsai(currentBonsai.id);
+            router.replace("/");
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -536,6 +556,18 @@ export default function BonsaiScreen() {
             </Text>
           )}
         </View>
+
+        <TouchableOpacity
+          style={styles.deleteBonsaiButton}
+          onPress={confirmDeleteBonsai}
+        >
+          <Ionicons
+            name="trash-outline"
+            size={18}
+            color={THEME.colors.danger}
+          />
+          <Text style={styles.deleteBonsaiText}>Eliminar bonsái</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -872,5 +904,20 @@ const styles = StyleSheet.create({
   emptyText: {
     color: THEME.colors.muted,
     lineHeight: 22,
+  },
+  deleteBonsaiButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: THEME.spacing.sm,
+    borderWidth: 1,
+    borderColor: "rgba(231,111,81,0.35)",
+    borderRadius: 8,
+    paddingVertical: THEME.spacing.md,
+    marginTop: THEME.spacing.sm,
+  },
+  deleteBonsaiText: {
+    color: THEME.colors.danger,
+    fontWeight: "800",
   },
 });

@@ -7,11 +7,12 @@ import {
   setDoc,
   writeBatch,
 } from "firebase/firestore";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   deleteObject,
   getDownloadURL,
   ref,
-  uploadBytes,
+  uploadString,
 } from "firebase/storage";
 
 import { db, storage } from "@/services/firebase/config";
@@ -38,14 +39,20 @@ function getPhotoStoragePath(userId: string, bonsaiId: string, photoId: string) 
   return `users/${userId}/bonsais/${bonsaiId}/photos/${photoId}.jpg`;
 }
 
-async function uriToBlob(uri: string) {
-  const response = await fetch(uri);
+async function uriToBase64(uri: string) {
+  if (uri.startsWith("data:image")) {
+    return uri.split("base64,")[1] ?? "";
+  }
 
-  if (!response.ok) {
+  const base64 = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+
+  if (!base64) {
     throw new Error("No se pudo leer la imagen local.");
   }
 
-  return response.blob();
+  return base64;
 }
 
 export async function uploadBonsaiPhoto(params: {
@@ -64,9 +71,9 @@ export async function uploadBonsaiPhoto(params: {
       params.photoId,
     );
     const photoRef = ref(storage, storagePath);
-    const blob = await uriToBlob(params.uri);
+    const base64 = await uriToBase64(params.uri);
 
-    await uploadBytes(photoRef, blob, {
+    await uploadString(photoRef, base64, "base64", {
       contentType: "image/jpeg",
     });
 
