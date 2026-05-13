@@ -40,6 +40,16 @@ const TASK_ACTION: Record<BonsaiCareTask["type"], string> = {
   water: "Registrar",
 };
 
+type CollectionFilter = "all" | "needsWater" | "needsPhoto" | "needsSpecies" | "atRisk";
+
+const FILTER_LABELS: Record<CollectionFilter, string> = {
+  all: "Todos",
+  needsWater: "Riego",
+  needsPhoto: "Fotos",
+  needsSpecies: "Especie",
+  atRisk: "Riesgo",
+};
+
 export default function CollectionScreen() {
   const {
     bonsais,
@@ -53,6 +63,7 @@ export default function CollectionScreen() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
+  const [activeFilter, setActiveFilter] = useState<CollectionFilter>("all");
 
   useEffect(() => {
     const initialize = async () => {
@@ -85,6 +96,32 @@ export default function CollectionScreen() {
     () => (focusBonsai ? getCareRecommendation(focusBonsai, weather) : null),
     [focusBonsai, weather],
   );
+  const filteredBonsais = useMemo(() => {
+    if (activeFilter === "all") return bonsais;
+
+    return bonsais.filter((bonsai) => {
+      const health = getBonsaiHealthScore({
+        wateringHistory: bonsai.wateringHistory ?? [],
+        lastWatering: bonsai.lastWatering,
+      });
+      const photoCount = getUniquePhotoCount(bonsai);
+      const bonsaiTasks = getCollectionCareTasks([bonsai]);
+
+      if (activeFilter === "needsWater") {
+        return bonsaiTasks.some((task) => task.type === "water");
+      }
+
+      if (activeFilter === "needsPhoto") {
+        return photoCount < 4;
+      }
+
+      if (activeFilter === "needsSpecies") {
+        return !bonsai.species;
+      }
+
+      return health.status === "critical" || health.status === "warning";
+    });
+  }, [activeFilter, bonsais]);
 
   const handleTaskPress = (task: BonsaiCareTask) => {
     setCurrentBonsai(task.bonsaiId);
@@ -260,8 +297,39 @@ export default function CollectionScreen() {
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Tus bonsáis</Text>
-          <Text style={styles.sectionMeta}>{bonsais.length} en colección</Text>
+          <Text style={styles.sectionMeta}>
+            {filteredBonsais.length} de {bonsais.length}
+          </Text>
         </View>
+
+        {bonsais.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            {(Object.keys(FILTER_LABELS) as CollectionFilter[]).map((filter) => {
+              const isActive = activeFilter === filter;
+
+              return (
+                <TouchableOpacity
+                  key={filter}
+                  style={[styles.filterChip, isActive && styles.filterChipActive]}
+                  onPress={() => setActiveFilter(filter)}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      isActive && styles.filterChipTextActive,
+                    ]}
+                  >
+                    {FILTER_LABELS[filter]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : null}
 
         {bonsais.length === 0 ? (
           <View style={styles.emptyState}>
@@ -283,7 +351,23 @@ export default function CollectionScreen() {
           </View>
         ) : (
           <View style={styles.collectionList}>
-            {bonsais.map((bonsai) => {
+            {filteredBonsais.length === 0 ? (
+              <View style={styles.doneCard}>
+                <Ionicons
+                  name="filter-outline"
+                  size={24}
+                  color={THEME.colors.primary}
+                />
+                <View style={styles.doneContent}>
+                  <Text style={styles.doneTitle}>Sin resultados</Text>
+                  <Text style={styles.doneText}>
+                    No hay bonsáis dentro de este filtro.
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {filteredBonsais.map((bonsai) => {
               const health = getBonsaiHealthScore({
                 wateringHistory: bonsai.wateringHistory ?? [],
                 lastWatering: bonsai.lastWatering,
@@ -631,6 +715,30 @@ const styles = StyleSheet.create({
   },
   collectionList: {
     gap: 12,
+  },
+  filterRow: {
+    gap: 8,
+    paddingBottom: 12,
+  },
+  filterChip: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    backgroundColor: THEME.colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  filterChipActive: {
+    backgroundColor: THEME.colors.primary,
+    borderColor: THEME.colors.primary,
+  },
+  filterChipText: {
+    color: THEME.colors.muted,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  filterChipTextActive: {
+    color: "#fff",
   },
   bonsaiCard: {
     flexDirection: "row",

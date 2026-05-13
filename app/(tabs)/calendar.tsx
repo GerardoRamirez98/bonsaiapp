@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { THEME } from "@/constants/theme";
 import { useBonsaiStore } from "@/store/bonsaiStore";
+import { getSeasonalCarePlan } from "@/utils/bonsaiCarePlan";
 import { getLocalDateString } from "@/utils/dateTime";
 
 export default function CalendarScreen() {
@@ -40,6 +41,13 @@ export default function CalendarScreen() {
   const selectedEvents = useMemo(
     () => timelineEvents.filter((event) => event.date === selectedDate),
     [timelineEvents, selectedDate],
+  );
+  const seasonalCare = useMemo(
+    () =>
+      currentBonsai
+        ? getSeasonalCarePlan(currentBonsai, new Date(`${selectedDate}T12:00:00`))
+        : [],
+    [currentBonsai, selectedDate],
   );
 
   if (!currentBonsai) {
@@ -90,6 +98,32 @@ export default function CalendarScreen() {
                     {event.description}
                   </Text>
                 ) : null}
+              </View>
+            ))
+          )}
+        </View>
+
+        <View style={styles.detailsCard}>
+          <Text style={styles.sectionTitle}>Cuidados sugeridos</Text>
+          {seasonalCare.length === 0 ? (
+            <Text style={styles.emptyText}>
+              No hay técnicas destacadas para este mes.
+            </Text>
+          ) : (
+            seasonalCare.map((activity) => (
+              <View key={activity.id} style={styles.careRow}>
+                <View
+                  style={[
+                    styles.priorityDot,
+                    activity.priority === "high" && styles.priorityDotHigh,
+                  ]}
+                />
+                <View style={styles.careBody}>
+                  <Text style={styles.eventTitle}>{activity.title}</Text>
+                  <Text style={styles.eventDescription}>
+                    {activity.description}
+                  </Text>
+                </View>
               </View>
             ))
           )}
@@ -155,6 +189,25 @@ const styles = StyleSheet.create({
   eventDescription: {
     marginTop: THEME.spacing.xs,
     color: THEME.colors.muted,
+  },
+  careRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: THEME.spacing.sm,
+    marginBottom: THEME.spacing.md,
+  },
+  careBody: {
+    flex: 1,
+  },
+  priorityDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: THEME.colors.secondary,
+    marginTop: 6,
+  },
+  priorityDotHigh: {
+    backgroundColor: THEME.colors.danger,
   },
   summaryCard: {
     marginTop: THEME.spacing.lg,

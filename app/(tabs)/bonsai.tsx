@@ -15,6 +15,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { THEME } from "@/constants/theme";
 import { useBonsaiStore } from "@/store/bonsaiStore";
+import { getSeasonalCarePlan } from "@/utils/bonsaiCarePlan";
+import {
+  DIAGNOSIS_OPTIONS,
+  diagnoseBonsai,
+  type DiagnosisSymptom,
+} from "@/utils/bonsaiDiagnosis";
 import {
   getLocalDateString,
   getLocalTimeString,
@@ -83,6 +89,7 @@ export default function BonsaiScreen() {
   const [waterDate, setWaterDate] = useState(getTodayDate());
   const [waterTime, setWaterTime] = useState(getCurrentTime());
   const [waterNotes, setWaterNotes] = useState("");
+  const [selectedSymptoms, setSelectedSymptoms] = useState<DiagnosisSymptom[]>([]);
 
   const totalEvents = useMemo(
     () => currentBonsai?.timeline?.length ?? 0,
@@ -126,6 +133,15 @@ export default function BonsaiScreen() {
   const visualEvolution = useMemo(
     () => (currentBonsai ? getVisualEvolution(currentBonsai) : null),
     [currentBonsai],
+  );
+  const seasonalCare = useMemo(
+    () => (currentBonsai ? getSeasonalCarePlan(currentBonsai).slice(0, 4) : []),
+    [currentBonsai],
+  );
+  const diagnosisResult = useMemo(
+    () =>
+      currentBonsai ? diagnoseBonsai(currentBonsai, selectedSymptoms) : null,
+    [currentBonsai, selectedSymptoms],
   );
 
   if (!currentBonsai) {
@@ -245,6 +261,14 @@ export default function BonsaiScreen() {
     );
   };
 
+  const toggleSymptom = (symptom: DiagnosisSymptom) => {
+    setSelectedSymptoms((current) =>
+      current.includes(symptom)
+        ? current.filter((item) => item !== symptom)
+        : [...current, symptom],
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -311,6 +335,103 @@ export default function BonsaiScreen() {
                 : "Sin actividad"}
             </Text>
           </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionTitle}>Cuidados de temporada</Text>
+              <Text style={styles.sectionHelp}>
+                Sugerencias según especie y mes actual.
+              </Text>
+            </View>
+          </View>
+
+          {seasonalCare.length === 0 ? (
+            <Text style={styles.emptyText}>
+              No hay cuidados destacados para este periodo.
+            </Text>
+          ) : (
+            seasonalCare.map((activity) => (
+              <View key={activity.id} style={styles.carePlanRow}>
+                <View style={styles.carePlanIcon}>
+                  <Ionicons
+                    name={
+                      activity.type === "fertilizer"
+                        ? "flask-outline"
+                        : activity.type === "repot"
+                          ? "cube-outline"
+                          : activity.type === "photo"
+                            ? "camera-outline"
+                            : activity.type === "protection"
+                              ? "shield-checkmark-outline"
+                              : "cut-outline"
+                    }
+                    size={18}
+                    color={THEME.colors.primary}
+                  />
+                </View>
+                <View style={styles.carePlanBody}>
+                  <Text style={styles.timelineTitle}>{activity.title}</Text>
+                  <Text style={styles.timelineDescription}>
+                    {activity.description}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Diagnóstico rápido</Text>
+          <Text style={styles.sectionHelp}>
+            Marca señales visibles para obtener una guía inicial.
+          </Text>
+
+          <View style={styles.symptomGrid}>
+            {DIAGNOSIS_OPTIONS.map((option) => {
+              const isActive = selectedSymptoms.includes(option.id);
+
+              return (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.symptomChip,
+                    isActive && styles.symptomChipActive,
+                  ]}
+                  onPress={() => toggleSymptom(option.id)}
+                >
+                  <Text
+                    style={[
+                      styles.symptomChipText,
+                      isActive && styles.symptomChipTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {diagnosisResult ? (
+            <View
+              style={[
+                styles.diagnosisBox,
+                diagnosisResult.severity === "high" && styles.diagnosisBoxHigh,
+              ]}
+            >
+              <Text style={styles.diagnosisTitle}>{diagnosisResult.title}</Text>
+              <Text style={styles.diagnosisSummary}>
+                {diagnosisResult.summary}
+              </Text>
+              {diagnosisResult.actions.map((action) => (
+                <Text key={action} style={styles.diagnosisAction}>
+                  · {action}
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.sectionCard}>
@@ -705,6 +826,75 @@ const styles = StyleSheet.create({
     color: THEME.colors.text,
     fontWeight: "700",
     textAlign: "right",
+  },
+  carePlanRow: {
+    flexDirection: "row",
+    gap: THEME.spacing.sm,
+    marginBottom: THEME.spacing.md,
+  },
+  carePlanIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E7F0E9",
+  },
+  carePlanBody: {
+    flex: 1,
+  },
+  symptomGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: THEME.spacing.sm,
+    marginTop: THEME.spacing.md,
+  },
+  symptomChip: {
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    borderRadius: 8,
+    paddingHorizontal: THEME.spacing.sm,
+    paddingVertical: THEME.spacing.sm,
+    backgroundColor: "#fff",
+  },
+  symptomChipActive: {
+    borderColor: THEME.colors.primary,
+    backgroundColor: "#E7F0E9",
+  },
+  symptomChipText: {
+    color: THEME.colors.muted,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  symptomChipTextActive: {
+    color: THEME.colors.primary,
+  },
+  diagnosisBox: {
+    borderRadius: 8,
+    backgroundColor: "#F7FAF7",
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    padding: THEME.spacing.md,
+    marginTop: THEME.spacing.md,
+  },
+  diagnosisBoxHigh: {
+    backgroundColor: "#FFF7F3",
+    borderColor: "rgba(231,111,81,0.35)",
+  },
+  diagnosisTitle: {
+    color: THEME.colors.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  diagnosisSummary: {
+    color: THEME.colors.muted,
+    lineHeight: 19,
+    marginTop: THEME.spacing.xs,
+  },
+  diagnosisAction: {
+    color: THEME.colors.text,
+    lineHeight: 20,
+    marginTop: THEME.spacing.xs,
   },
   sectionCard: {
     backgroundColor: THEME.colors.surface,
