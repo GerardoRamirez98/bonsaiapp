@@ -13,6 +13,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useBonsaiStore } from "../store/bonsaiStore";
+import { getLocalDateString } from "../utils/dateTime";
 import {
     detectBonsaiSpecies,
     extractBase64FromUri,
@@ -36,10 +37,30 @@ export default function Result() {
     base64?: string | null;
   };
 
+  const parsePhotoPayloads = useCallback((value: unknown): PhotoPayload[] => {
+    if (!value || typeof value !== "string") return [];
+
+    try {
+      const parsed = JSON.parse(value);
+
+      if (!Array.isArray(parsed)) return [];
+
+      return parsed.filter(
+        (photo): photo is PhotoPayload =>
+          Boolean(photo) &&
+          typeof photo === "object" &&
+          typeof photo.uri === "string",
+      );
+    } catch (error) {
+      console.error("Error parsing scan photos:", error);
+      return [];
+    }
+  }, []);
+
   // Parse newPhotos from params if provided
   const newPhotos: PhotoPayload[] = useMemo(
-    () => (newPhotosParam ? JSON.parse(newPhotosParam as string) : []),
-    [newPhotosParam],
+    () => parsePhotoPayloads(newPhotosParam),
+    [newPhotosParam, parsePhotoPayloads],
   );
 
   // Get existing bonsai or prepare to create new one
@@ -121,11 +142,11 @@ export default function Result() {
         isInPot: true,
         potType: "",
         lastRepotDate: "",
-        dateAdded: new Date().toISOString(),
+        dateAdded: getLocalDateString(),
         lastWatering: null,
         wateringHistory: [],
-        scanHistory: [newPhotos.map((photo) => photo.uri)],
-        allPhotos: newPhotos.map((photo) => photo.uri),
+        scanHistory: [],
+        allPhotos: [],
         heroPhoto: newPhotos[0]?.uri,
         photoHistory: [],
         sunExposureHistory: [],

@@ -171,6 +171,9 @@ export interface BonsaiStoreState {
   // Bonsai Collection
   bonsais: Bonsai[];
   currentBonsaiId: string | null; // ID of the currently viewed/active bonsai
+  isSyncing: boolean;
+  syncError: string | null;
+  activeUserId: string | null;
 
   // Actions
   addBonsai: (bonsai: Omit<Bonsai, "id">) => string; // Returns the new bonsai ID
@@ -205,4 +208,11 @@ export interface BonsaiStoreState {
   importBonsais: (bonsais: Bonsai[]) => void;
   loadFromStorage: () => Promise<void>;
   saveToStorage: () => Promise<void>;
+  hydrateFromRemote: (bonsais: Bonsai[]) => void;
+  setSyncState: (state: {
+    isSyncing?: boolean;
+    syncError?: string | null;
+    activeUserId?: string | null;
+  }) => void;
+  resetForSignedOutUser: () => void;
 }

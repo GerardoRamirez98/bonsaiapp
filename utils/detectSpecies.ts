@@ -6,7 +6,8 @@ import { SpeciesDetectionResult } from "../types/bonsai";
  * Set as environment variable: EXPO_PUBLIC_PLANT_ID_API_KEY
  */
 const PLANT_ID_API_KEY = process.env.EXPO_PUBLIC_PLANT_ID_API_KEY || null;
-const PLANT_ID_API_URL = "https://api.plant.id/v3/identification";
+const PLANT_ID_API_URL =
+    "https://api.plant.id/v3/identification?details=common_names,url,wiki_description";
 
 /**
  * Detect bonsai species from an image
@@ -59,14 +60,15 @@ export async function detectBonsaiSpecies(
             },
             body: JSON.stringify({
                 images: [imageBase64],
-                modifiers: ["crops_fast", "similar_images"],
-                plant_language: "es", // Spanish results
-                plant_details: ["common_names", "url", "wiki_description"],
             }),
         });
 
         if (!response.ok) {
-            console.error(`Plant.id API error: ${response.status} ${response.statusText}`);
+            const errorBody = await response.text();
+            console.error(
+                `Plant.id API error: ${response.status} ${response.statusText}`,
+                errorBody
+            );
 
             // Handle specific error codes
             if (response.status === 401) {
@@ -107,10 +109,20 @@ export async function detectBonsaiSpecies(
         // Extract information
         const species = suggestion?.name ?? "Desconocido";
         const commonName =
-            suggestion?.common_names?.[0] ?? suggestion?.name ?? "Unknown";
+            suggestion?.details?.common_names?.[0] ??
+            suggestion?.common_names?.[0] ??
+            suggestion?.name ??
+            "Unknown";
         const confidence = suggestion?.probability ?? 0;
-        const description = suggestion?.wiki_description?.value ?? undefined;
-        const imageUrl = suggestion?.image_url ?? suggestion?.url ?? undefined;
+        const description =
+            suggestion?.details?.wiki_description?.value ??
+            suggestion?.wiki_description?.value ??
+            undefined;
+        const imageUrl =
+            suggestion?.details?.url ??
+            suggestion?.image_url ??
+            suggestion?.url ??
+            undefined;
 
         console.log(
             `Species detected: ${species} (${(confidence * 100).toFixed(1)}% confidence)`

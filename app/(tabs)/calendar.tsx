@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { THEME } from "@/constants/theme";
 import { useBonsaiStore } from "@/store/bonsaiStore";
+import { getLocalDateString } from "@/utils/dateTime";
 
 const EVENT_LABELS: Record<string, string> = {
   water: "Riego",
@@ -23,7 +24,7 @@ export default function CalendarScreen() {
   );
 
   const [selectedDate, setSelectedDate] = useState(
-    new Date().toISOString().split("T")[0],
+    getLocalDateString(),
   );
 
   const timelineEvents = useMemo(() => {
@@ -33,7 +34,7 @@ export default function CalendarScreen() {
       (event, index) => ({
         id: `${event.type}-${event.date}-${event.intensity ?? 0}-${index}`,
         date: event.date,
-        time: "--:--",
+        time: event.time ?? "--:--",
         type: event.type,
         title: EVENT_LABELS[event.type] || "Riego",
         description: event.notes || `Intensidad ${event.intensity ?? 1}`,

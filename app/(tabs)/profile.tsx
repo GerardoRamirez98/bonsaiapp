@@ -15,10 +15,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { THEME } from "@/constants/theme";
 import {
-  loadUserBonsais,
   onAuthStateChangedListener,
   registerWithEmail,
-  saveUserBonsais,
   signInWithEmail,
   signOutUser,
 } from "@/services/firebase";
@@ -28,7 +26,6 @@ import {
 } from "@/services/notifications";
 import { getOpenAICareSuggestion } from "@/services/openai";
 import { useBonsaiStore } from "@/store/bonsaiStore";
-import { Bonsai } from "@/types/bonsai";
 import { generateBonsaisCsv } from "@/utils/exportBonsais";
 
 const fallbackSpacing = {
@@ -67,7 +64,9 @@ const shadows = THEME?.shadows ?? fallbackShadows;
 export default function ProfileScreen() {
   const currentBonsai = useBonsaiStore((state) => state.getCurrentBonsai());
   const bonsais = useBonsaiStore((state) => state.bonsais);
-  const importBonsais = useBonsaiStore((state) => state.importBonsais);
+  const isSyncing = useBonsaiStore((state) => state.isSyncing);
+  const syncError = useBonsaiStore((state) => state.syncError);
+  const activeUserId = useBonsaiStore((state) => state.activeUserId);
 
   const [firebaseStatus, setFirebaseStatus] = useState("Verificando...");
   const [authUser, setAuthUser] = useState<any>(null);
@@ -78,7 +77,6 @@ export default function ProfileScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState("Pendiente");
   const [reminderMessage, setReminderMessage] = useState<string | null>(null);
-  const [backupStatus, setBackupStatus] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -205,63 +203,6 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleBackupToCloud = async () => {
-    if (!authUser) {
-      Alert.alert(
-        "Inicia sesión",
-        "Inicia sesión para guardar un respaldo en la nube.",
-      );
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      await saveUserBonsais(authUser.uid, bonsais);
-      setBackupStatus("Backup guardado en Firestore correctamente.");
-    } catch (error) {
-      console.error(error);
-      Alert.alert(
-        "Error al respaldar",
-        "No se pudo guardar los bonsáis en la nube.",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRestoreFromCloud = async () => {
-    if (!authUser) {
-      Alert.alert(
-        "Inicia sesión",
-        "Inicia sesión para restaurar desde la nube.",
-      );
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      const cloudBonsais = await loadUserBonsais(authUser.uid);
-      if (!cloudBonsais || cloudBonsais.length === 0) {
-        Alert.alert(
-          "Sin datos en la nube",
-          "No se encontró respaldo para esta cuenta.",
-        );
-        return;
-      }
-
-      importBonsais(cloudBonsais as Bonsai[]);
-      setBackupStatus("Restauración completa desde Firestore.");
-    } catch (error) {
-      console.error(error);
-      Alert.alert(
-        "Error al restaurar",
-        "No se pudieron cargar los bonsáis guardados.",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleExportCsv = async () => {
     const csv = generateBonsaisCsv(bonsais);
 
@@ -363,24 +304,22 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Respaldo en la nube</Text>
+          <Text style={styles.cardTitle}>Sincronización en tiempo real</Text>
           <Text style={styles.cardText}>
-            Guarda y restaura tus bonsáis en Firebase.
+            Firebase es la fuente principal. Tus cambios se guardan en Firestore
+            y se actualizan automáticamente con onSnapshot.
           </Text>
-          <TouchableOpacity style={styles.button} onPress={handleBackupToCloud}>
-            <Text style={styles.buttonText}>Guardar en la nube</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.buttonSecondary}
-            onPress={handleRestoreFromCloud}
-          >
-            <Text style={styles.buttonSecondaryText}>
-              Restaurar desde la nube
-            </Text>
-          </TouchableOpacity>
-          {backupStatus ? (
-            <Text style={styles.message}>{backupStatus}</Text>
-          ) : null}
+          <Text style={styles.cardText}>
+            Estado:{" "}
+            {syncError
+              ? "Error de sincronización"
+              : isSyncing
+                ? "Sincronizando..."
+                : activeUserId
+                  ? "Sincronizado"
+                  : "Sin sesión"}
+          </Text>
+          {syncError ? <Text style={styles.errorText}>{syncError}</Text> : null}
         </View>
 
         <View style={styles.card}>
@@ -503,6 +442,11 @@ const styles = StyleSheet.create({
   message: {
     fontSize: THEME.typography.caption.fontSize,
     color: THEME.colors.primary,
+    marginTop: THEME.spacing.sm,
+  },
+  errorText: {
+    fontSize: THEME.typography.caption.fontSize,
+    color: THEME.colors.danger,
     marginTop: THEME.spacing.sm,
   },
   loader: {

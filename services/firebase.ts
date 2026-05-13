@@ -10,9 +10,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { doc, getDoc, getFirestore, setDoc } from "firebase/firestore";
-
-import type { Bonsai } from "@/types/bonsai";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY!,
@@ -48,25 +46,3 @@ export const signOutUser = () => signOut(auth);
 export const onAuthStateChangedListener = (
   callback: (user: User | null) => void,
 ) => onAuthStateChanged(auth, callback);
-
-export const saveUserBonsais = async (userId: string, bonsais: Bonsai[]) => {
-  await setDoc(
-    doc(db, "users", userId),
-    {
-      bonsais,
-      updatedAt: new Date().toISOString(),
-    },
-    { merge: true },
-  );
-};
-
-export const loadUserBonsais = async (userId: string): Promise<Bonsai[]> => {
-  const snapshot = await getDoc(doc(db, "users", userId));
-
-  if (!snapshot.exists()) {
-    return [];
-  }
-
-  const data = snapshot.data();
-  return Array.isArray(data.bonsais) ? (data.bonsais as Bonsai[]) : [];
-};

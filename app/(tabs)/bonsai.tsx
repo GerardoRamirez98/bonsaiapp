@@ -14,6 +14,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { THEME } from "@/constants/theme";
 import { useBonsaiStore } from "@/store/bonsaiStore";
+import {
+  getLocalDateString,
+  getLocalTimeString,
+  isDateString,
+  isTimeString,
+} from "@/utils/dateTime";
 
 const EVENT_LABELS: Record<string, string> = {
   water: "Riego",
@@ -27,11 +33,11 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 function getTodayDate() {
-  return new Date().toISOString().split("T")[0];
+  return getLocalDateString();
 }
 
 function getCurrentTime() {
-  return new Date().toISOString().slice(11, 16);
+  return getLocalTimeString();
 }
 
 function formatDate(value?: string | null) {
@@ -177,12 +183,12 @@ export default function BonsaiScreen() {
   };
 
   const registerManualWatering = () => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(waterDate)) {
+    if (!isDateString(waterDate)) {
       Alert.alert("Fecha inválida", "Usa el formato AAAA-MM-DD.");
       return;
     }
 
-    if (!/^\d{2}:\d{2}$/.test(waterTime)) {
+    if (!isTimeString(waterTime)) {
       Alert.alert("Hora inválida", "Usa el formato HH:mm.");
       return;
     }
@@ -204,9 +210,9 @@ export default function BonsaiScreen() {
     const start = new Date(now.getTime() - 60 * 60 * 1000);
 
     addSunExposureEvent(currentBonsai.id, {
-      date: now.toISOString().split("T")[0],
-      startTime: start.toISOString().slice(11, 16),
-      endTime: now.toISOString().slice(11, 16),
+      date: getLocalDateString(now),
+      startTime: getLocalTimeString(start),
+      endTime: getLocalTimeString(now),
       durationMinutes: 60,
       temperature: undefined,
       notes: "Registro rápido de sol",
