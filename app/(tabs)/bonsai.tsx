@@ -20,6 +20,7 @@ import {
   isDateString,
   isTimeString,
 } from "@/utils/dateTime";
+import { getVisualEvolution } from "@/utils/visualEvolution";
 
 const EVENT_LABELS: Record<string, string> = {
   water: "Riego",
@@ -119,6 +120,11 @@ export default function BonsaiScreen() {
 
     return Array.from(grouped.values());
   }, [currentBonsai]);
+
+  const visualEvolution = useMemo(
+    () => (currentBonsai ? getVisualEvolution(currentBonsai) : null),
+    [currentBonsai],
+  );
 
   if (!currentBonsai) {
     return (
@@ -285,6 +291,62 @@ export default function BonsaiScreen() {
                 : "Sin actividad"}
             </Text>
           </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionTitle}>Evolución visual</Text>
+              <Text style={styles.sectionHelp}>
+                Compara el primer registro contra la foto más reciente.
+              </Text>
+            </View>
+            <Text style={styles.selectedCount}>
+              {visualEvolution?.milestoneCount ?? 0} hitos
+            </Text>
+          </View>
+
+          {visualEvolution?.firstPhoto &&
+          visualEvolution.latestPhoto &&
+          visualEvolution.milestoneCount >= 2 ? (
+            <>
+              <View style={styles.evolutionGrid}>
+                <View style={styles.evolutionFrame}>
+                  <Image
+                    source={{ uri: visualEvolution.firstPhoto.uri }}
+                    style={styles.evolutionImage}
+                  />
+                  <Text style={styles.evolutionLabel}>Primera</Text>
+                </View>
+                <View style={styles.evolutionFrame}>
+                  <Image
+                    source={{ uri: visualEvolution.latestPhoto.uri }}
+                    style={styles.evolutionImage}
+                  />
+                  <Text style={styles.evolutionLabel}>Reciente</Text>
+                </View>
+              </View>
+              <View style={styles.evolutionStats}>
+                <Text style={styles.evolutionStatValue}>
+                  {visualEvolution.daysTracked}
+                </Text>
+                <Text style={styles.evolutionStatLabel}>días documentados</Text>
+              </View>
+              <View style={styles.evolutionStrip}>
+                {visualEvolution.photos.slice(-6).map((photo) => (
+                  <Image
+                    key={photo.id}
+                    source={{ uri: photo.uri }}
+                    style={styles.evolutionThumb}
+                  />
+                ))}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.emptyText}>
+              Agrega al menos dos fotos para construir tu evolución visual.
+            </Text>
+          )}
         </View>
 
         <View style={styles.sectionCard}>
@@ -540,6 +602,55 @@ const styles = StyleSheet.create({
     color: THEME.colors.muted,
     fontSize: 11,
     marginTop: 2,
+  },
+  evolutionGrid: {
+    flexDirection: "row",
+    gap: THEME.spacing.sm,
+  },
+  evolutionFrame: {
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    backgroundColor: "#fff",
+  },
+  evolutionImage: {
+    width: "100%",
+    height: 150,
+  },
+  evolutionLabel: {
+    color: THEME.colors.text,
+    fontSize: 12,
+    fontWeight: "800",
+    padding: THEME.spacing.sm,
+  },
+  evolutionStats: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: THEME.spacing.xs,
+    marginTop: THEME.spacing.md,
+  },
+  evolutionStatValue: {
+    color: THEME.colors.primary,
+    fontSize: 28,
+    fontWeight: "900",
+  },
+  evolutionStatLabel: {
+    color: THEME.colors.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  evolutionStrip: {
+    flexDirection: "row",
+    gap: THEME.spacing.xs,
+    marginTop: THEME.spacing.md,
+  },
+  evolutionThumb: {
+    width: 42,
+    height: 42,
+    borderRadius: 8,
   },
   infoCard: {
     backgroundColor: THEME.colors.surface,

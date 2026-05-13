@@ -4,7 +4,7 @@ export function updateBonsaiById(
   bonsais: Bonsai[],
   bonsaiId: string,
   updater: (bonsai: Bonsai) => Bonsai,
-) {
+): { bonsais: Bonsai[]; updatedBonsai: Bonsai | null } {
   let updatedBonsai: Bonsai | null = null;
 
   const updatedBonsais = bonsais.map((bonsai) => {

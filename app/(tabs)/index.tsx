@@ -14,11 +14,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { THEME } from "@/constants/theme";
+import { getWeather, type WeatherSnapshot } from "@/services/weather";
 import { useBonsaiStore } from "@/store/bonsaiStore";
+import { getCareRecommendation } from "@/utils/careIntelligence";
 import { getBonsaiHealthScore } from "@/utils/bonsaiHealthScore";
 import {
   formatLastWatering,
   getCollectionCareTasks,
+  getCollectionStats,
   getUniquePhotoCount,
   type BonsaiCareTask,
 } from "@/utils/bonsaiInsights";
@@ -49,6 +52,7 @@ export default function CollectionScreen() {
   } = useBonsaiStore();
 
   const [isLoading, setIsLoading] = useState(true);
+  const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
 
   useEffect(() => {
     const initialize = async () => {
@@ -64,7 +68,23 @@ export default function CollectionScreen() {
     void initialize();
   }, [loadFromStorage]);
 
+  useEffect(() => {
+    void getWeather()
+      .then(setWeather)
+      .catch(() => setWeather(null));
+  }, []);
+
   const tasks = useMemo(() => getCollectionCareTasks(bonsais).slice(0, 5), [bonsais]);
+  const stats = useMemo(() => getCollectionStats(bonsais), [bonsais]);
+  const focusBonsai = useMemo(
+    () =>
+      bonsais.find((bonsai) => bonsai.id === tasks[0]?.bonsaiId) ?? bonsais[0],
+    [bonsais, tasks],
+  );
+  const careRecommendation = useMemo(
+    () => (focusBonsai ? getCareRecommendation(focusBonsai, weather) : null),
+    [focusBonsai, weather],
+  );
 
   const handleTaskPress = (task: BonsaiCareTask) => {
     setCurrentBonsai(task.bonsaiId);
@@ -128,6 +148,68 @@ export default function CollectionScreen() {
         <Text style={[styles.syncStatus, syncError ? styles.syncError : null]}>
           {syncStatus}
         </Text>
+
+        {bonsais.length > 0 ? (
+          <>
+            <View style={styles.metricsStrip}>
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{stats.averageHealth}</Text>
+                <Text style={styles.metricLabel}>Salud</Text>
+              </View>
+              <View style={styles.metricDivider} />
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{stats.photoCount}</Text>
+                <Text style={styles.metricLabel}>Fotos</Text>
+              </View>
+              <View style={styles.metricDivider} />
+              <View style={styles.metricItem}>
+                <Text style={styles.metricValue}>{stats.pendingTasks}</Text>
+                <Text style={styles.metricLabel}>Pendientes</Text>
+              </View>
+            </View>
+
+            {focusBonsai && careRecommendation ? (
+              <TouchableOpacity
+                style={[
+                  styles.careCard,
+                  careRecommendation.urgency === "high" && styles.careCardHigh,
+                ]}
+                onPress={() => {
+                  setCurrentBonsai(focusBonsai.id);
+                  router.push("/bonsai");
+                }}
+              >
+                <View style={styles.careIcon}>
+                  <Ionicons
+                    name={
+                      careRecommendation.urgency === "high"
+                        ? "alert-circle-outline"
+                        : "sparkles-outline"
+                    }
+                    size={22}
+                    color={THEME.colors.primary}
+                  />
+                </View>
+                <View style={styles.careBody}>
+                  <Text style={styles.careKicker}>{focusBonsai.nickname}</Text>
+                  <Text style={styles.careTitle}>
+                    {careRecommendation.title}
+                  </Text>
+                  <Text style={styles.careText}>
+                    {careRecommendation.nextWateringLabel}
+                  </Text>
+                  {weather ? (
+                    <Text style={styles.careWeather}>
+                      {Math.round(weather.temperature)}°C · {weather.humidity}%
+                      humedad · {weather.rainProbability}% lluvia
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={styles.careScore}>{careRecommendation.score}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        ) : null}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Actividades por hacer</Text>
@@ -333,6 +415,89 @@ const styles = StyleSheet.create({
   },
   syncError: {
     color: THEME.colors.danger,
+  },
+  metricsStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#102A24",
+    borderRadius: 8,
+    paddingVertical: 14,
+    marginBottom: 12,
+  },
+  metricItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  metricValue: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  metricLabel: {
+    color: "rgba(255,255,255,0.68)",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  metricDivider: {
+    width: 1,
+    height: 34,
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  careCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: THEME.colors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    padding: 14,
+    marginBottom: 18,
+  },
+  careCardHigh: {
+    borderColor: "rgba(231,111,81,0.35)",
+    backgroundColor: "#FFF7F3",
+  },
+  careIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E7F0E9",
+    marginRight: 12,
+  },
+  careBody: {
+    flex: 1,
+  },
+  careKicker: {
+    color: THEME.colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    marginBottom: 2,
+  },
+  careTitle: {
+    color: THEME.colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  careText: {
+    color: THEME.colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+  careWeather: {
+    color: THEME.colors.primary,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 5,
+  },
+  careScore: {
+    color: THEME.colors.primary,
+    fontSize: 24,
+    fontWeight: "900",
+    marginLeft: 10,
   },
   sectionHeader: {
     flexDirection: "row",

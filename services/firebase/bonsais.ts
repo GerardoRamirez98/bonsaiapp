@@ -12,8 +12,13 @@ import {
 } from "firebase/firestore";
 
 import { db } from "@/services/firebase/config";
+import {
+  deleteAllBonsaiPhotos,
+  listBonsaiPhotos,
+  uploadBonsaiPhoto,
+} from "@/services/firebase/photos";
 import { removeUndefinedValues } from "@/services/firebase/utils";
-import type { Bonsai } from "@/types/bonsai";
+import type { Bonsai, PhotoHistoryEntry } from "@/types/bonsai";
 
 const usersCollection = "users";
 const bonsaisCollection = "bonsais";
@@ -26,65 +31,87 @@ export function bonsaiDocRef(userId: string, bonsaiId: string) {
   return doc(db, usersCollection, userId, bonsaisCollection, bonsaiId);
 }
 
-type FirestoreBonsai = Omit<Bonsai, "scanHistory"> & {
+type LightweightBonsai = Omit<
+  Bonsai,
+  "allPhotos" | "photoHistory" | "scanHistory"
+>;
+
+type FirestoreBonsai = LightweightBonsai & {
   name: string;
-  scanHistoryRecords: {
-    id: string;
-    urisByIndex: Record<string, string>;
-  }[];
+  photoCount: number;
 };
-
-function encodeScanHistory(scanHistory: string[][]) {
-  return scanHistory.map((uris, scanIndex) => ({
-    id: `scan-${scanIndex}`,
-    urisByIndex: Object.fromEntries(
-      uris.map((uri, uriIndex) => [String(uriIndex), uri]),
-    ),
-  }));
-}
-
-function decodeScanHistory(data: Record<string, unknown>) {
-  const records = data.scanHistoryRecords;
-
-  if (!Array.isArray(records)) return [];
-
-  return records.map((record) => {
-    if (!record || typeof record !== "object") return [];
-
-    const urisByIndex = (record as { urisByIndex?: Record<string, string> })
-      .urisByIndex;
-
-    if (!urisByIndex) return [];
-
-    return Object.entries(urisByIndex)
-      .sort(([left], [right]) => Number(left) - Number(right))
-      .map(([, uri]) => uri);
-  });
-}
 
 export function normalizeBonsaiFromFirestore(
   id: string,
   data: Record<string, unknown>,
 ) {
-  const { scanHistoryRecords, ...rest } = data;
-  void scanHistoryRecords;
+  const { photoCount, ...rest } = data;
+  void photoCount;
 
   return {
-    ...(rest as Omit<Bonsai, "id" | "scanHistory">),
+    ...(rest as Omit<Bonsai, "id" | "allPhotos" | "photoHistory" | "scanHistory">),
     id,
-    scanHistory: decodeScanHistory(data),
+    allPhotos: [],
+    photoHistory: [],
+    scanHistory: [],
   } as Bonsai;
 }
 
 export function prepareBonsaiForFirestore(bonsai: Bonsai): FirestoreBonsai {
-  const { scanHistory, ...bonsaiData } = bonsai;
+  const { allPhotos, photoHistory, scanHistory, ...bonsaiData } = bonsai;
 
   return removeUndefinedValues({
     ...bonsaiData,
     name: bonsai.nickname,
-    scanHistoryRecords: encodeScanHistory(scanHistory ?? []),
+    photoCount: photoHistory?.length ?? allPhotos?.length ?? 0,
     updatedAt: serverTimestamp(),
   });
+}
+
+function photosToScanHistory(photos: PhotoHistoryEntry[]) {
+  const grouped = photos.reduce<Record<string, string[]>>((acc, photo) => {
+    const scanId = photo.scanId ?? "ungrouped";
+    acc[scanId] = [...(acc[scanId] ?? []), photo.downloadUrl ?? photo.uri];
+    return acc;
+  }, {});
+
+  return Object.values(grouped);
+}
+
+function getMigrationPhotos(bonsai: Bonsai): PhotoHistoryEntry[] {
+  if (bonsai.photoHistory?.length) {
+    return bonsai.photoHistory;
+  }
+
+  return (bonsai.allPhotos ?? []).map((uri, index) => ({
+    id: `${bonsai.id}-migration-${index}`,
+    uri,
+    capturedAt: bonsai.dateAdded,
+    label: "Foto migrada",
+    isHero: uri === bonsai.heroPhoto,
+  }));
+}
+
+async function attachPhotos(userId: string, bonsai: Bonsai): Promise<Bonsai> {
+  const photos = await listBonsaiPhotos(userId, bonsai.id);
+  const sortedPhotos = photos.sort(
+    (left, right) =>
+      new Date(left.capturedAt).getTime() - new Date(right.capturedAt).getTime(),
+  );
+  const allPhotos = sortedPhotos.map((photo) => photo.downloadUrl ?? photo.uri);
+  const heroPhoto =
+    sortedPhotos.find((photo) => photo.isHero)?.downloadUrl ??
+    sortedPhotos.find((photo) => photo.isHero)?.uri ??
+    bonsai.heroPhoto ??
+    allPhotos[0];
+
+  return {
+    ...bonsai,
+    allPhotos,
+    photoHistory: sortedPhotos,
+    scanHistory: photosToScanHistory(sortedPhotos),
+    heroPhoto,
+  };
 }
 
 export function subscribeToUserBonsais(
@@ -97,11 +124,16 @@ export function subscribeToUserBonsais(
   return onSnapshot(
     bonsaisQuery,
     (snapshot) => {
-      const bonsais = snapshot.docs.map((entry) =>
-        normalizeBonsaiFromFirestore(entry.id, entry.data()),
-      );
-
-      onData(bonsais);
+      void Promise.all(
+        snapshot.docs.map((entry) =>
+          attachPhotos(
+            userId,
+            normalizeBonsaiFromFirestore(entry.id, entry.data()),
+          ),
+        ),
+      )
+        .then(onData)
+        .catch(onError);
     },
     onError,
   );
@@ -112,8 +144,13 @@ export async function getUserBonsais(userId: string) {
     query(bonsaisRef(userId), orderBy("dateAdded", "asc")),
   );
 
-  return snapshot.docs.map((entry) =>
-    normalizeBonsaiFromFirestore(entry.id, entry.data()),
+  return Promise.all(
+    snapshot.docs.map((entry) =>
+      attachPhotos(
+        userId,
+        normalizeBonsaiFromFirestore(entry.id, entry.data()),
+      ),
+    ),
   );
 }
 
@@ -126,6 +163,7 @@ export async function upsertBonsai(userId: string, bonsai: Bonsai) {
 }
 
 export async function deleteBonsai(userId: string, bonsaiId: string) {
+  await deleteAllBonsaiPhotos(userId, bonsaiId);
   await deleteDoc(bonsaiDocRef(userId, bonsaiId));
 }
 
@@ -141,4 +179,20 @@ export async function replaceUserBonsais(userId: string, bonsais: Bonsai[]) {
   });
 
   await batch.commit();
+
+  await Promise.all(
+    bonsais.flatMap((bonsai) =>
+      getMigrationPhotos(bonsai).map((photo) =>
+        uploadBonsaiPhoto({
+          userId,
+          bonsaiId: bonsai.id,
+          photoId: photo.id,
+          uri: photo.downloadUrl ?? photo.uri,
+          label: photo.label,
+          scanId: photo.scanId,
+          isHero: photo.isHero ?? photo.uri === bonsai.heroPhoto,
+        }),
+      ),
+    ),
+  );
 }

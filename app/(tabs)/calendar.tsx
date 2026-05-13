@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Calendar } from "react-native-calendars";
+import type { MarkedDates } from "react-native-calendars/src/types";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { THEME } from "@/constants/theme";
@@ -22,7 +23,7 @@ export default function CalendarScreen() {
   );
 
   const markedDates = useMemo(() => {
-    return timelineEvents.reduce((acc: Record<string, any>, event) => {
+    return timelineEvents.reduce<MarkedDates>((acc, event) => {
       acc[event.date] = {
         marked: true,
         dotColor:

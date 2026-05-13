@@ -5,6 +5,7 @@ import {
   getDocs,
   serverTimestamp,
   setDoc,
+  writeBatch,
 } from "firebase/firestore";
 import {
   deleteObject,
@@ -122,14 +123,36 @@ export async function deleteBonsaiPhoto(
   }
 }
 
+export async function deleteAllBonsaiPhotos(userId: string, bonsaiId: string) {
+  const photos = await listBonsaiPhotos(userId, bonsaiId);
+  await Promise.all(
+    photos.map((photo) => deleteBonsaiPhoto(userId, bonsaiId, photo)),
+  );
+}
+
 export async function setHeroPhotoMetadata(
   userId: string,
   bonsaiId: string,
   photoId: string,
 ) {
-  await setDoc(
-    photoDocRef(userId, bonsaiId, photoId),
-    { isHero: true, updatedAt: serverTimestamp() },
-    { merge: true },
-  );
+  const snapshot = await getDocs(photosCollectionRef(userId, bonsaiId));
+  const batch = writeBatch(db);
+
+  snapshot.docs.forEach((photo) => {
+    batch.set(
+      photo.ref,
+      { isHero: photo.id === photoId, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+  });
+
+  if (!snapshot.docs.some((photo) => photo.id === photoId)) {
+    batch.set(
+      photoDocRef(userId, bonsaiId, photoId),
+      { isHero: true, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+  }
+
+  await batch.commit();
 }

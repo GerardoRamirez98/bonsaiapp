@@ -5,9 +5,15 @@ import {
   deleteBonsai as deleteRemoteBonsai,
   upsertBonsai,
 } from "@/services/firebase/bonsais";
+import {
+  deleteBonsaiPhoto,
+  setHeroPhotoMetadata,
+  uploadBonsaiPhoto,
+} from "@/services/firebase/photos";
 import { updateUserSettings } from "@/services/firebase/users";
 import {
   handleFirebaseError,
+  handleStorageError,
 } from "@/services/firebase/utils";
 import { updateBonsaiById } from "@/store/actions/helpers";
 import {
@@ -23,7 +29,6 @@ import { appendTimelineEvent, createTimelineEvent } from "@/utils/timeline";
 import type {
   Bonsai,
   BonsaiStoreState,
-  BonsaiTimelineEvent,
   PhotoHistoryEntry,
   SunExposureEvent,
   WateringEvent,
@@ -103,6 +108,76 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     );
   };
 
+  const commitBonsaiUpdate = (
+    bonsaiId: string,
+    updater: (bonsai: Bonsai) => Bonsai,
+  ): Bonsai | null => {
+    let updatedBonsai: Bonsai | null = null;
+
+    set((state) => {
+      const result = updateBonsaiById(state.bonsais, bonsaiId, updater);
+      updatedBonsai = result.updatedBonsai;
+
+      return { bonsais: result.bonsais, syncError: null };
+    });
+
+    if (updatedBonsai) persistBonsai(updatedBonsai);
+
+    return updatedBonsai;
+  };
+
+  const syncUploadedPhotos = (
+    bonsaiId: string,
+    photos: PhotoHistoryEntry[],
+    shouldSetHeroPhoto = false,
+  ) => {
+    const userId = getAuthenticatedUserId(get().activeUserId);
+
+    if (!userId) return;
+
+    photos.forEach((photo, index) => {
+      void uploadBonsaiPhoto({
+        userId,
+        bonsaiId,
+        photoId: photo.id,
+        uri: photo.uri,
+        label: photo.label,
+        scanId: photo.scanId,
+        isHero: shouldSetHeroPhoto && index === 0,
+      })
+        .then((uploadedPhoto) => {
+          commitBonsaiUpdate(bonsaiId, (bonsai) => {
+            const nextPhotoHistory = (bonsai.photoHistory ?? []).map((entry) =>
+              entry.id === photo.id ? { ...entry, ...uploadedPhoto } : entry,
+            );
+            const nextAllPhotos = (bonsai.allPhotos ?? []).map((uri) =>
+              uri === photo.uri ? uploadedPhoto.downloadUrl : uri,
+            );
+            const nextScanHistory = (bonsai.scanHistory ?? []).map((scan) =>
+              scan.map((uri) =>
+                uri === photo.uri ? uploadedPhoto.downloadUrl : uri,
+              ),
+            );
+            const nextHeroPhoto =
+              bonsai.heroPhoto === photo.uri || uploadedPhoto.isHero
+                ? uploadedPhoto.downloadUrl
+                : bonsai.heroPhoto;
+
+            return {
+              ...bonsai,
+              photoHistory: nextPhotoHistory,
+              allPhotos: nextAllPhotos,
+              scanHistory: nextScanHistory,
+              heroPhoto: nextHeroPhoto,
+            };
+          });
+        })
+        .catch((error) => {
+          setSyncError(handleStorageError(error));
+        });
+    });
+  };
+
   return {
     bonsais: [],
     currentBonsaiId: null,
@@ -159,25 +234,14 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
       }
 
       void deleteRemoteBonsai(userId, id).catch((error) => {
-        console.error("Firestore delete bonsai error:", error);
-        setSyncError("No se pudo eliminar el bonsái en Firebase.");
+        setSyncError(
+          handleFirebaseError(error, "No se pudo eliminar el bonsái en Firebase."),
+        );
       });
     },
 
     updateBonsai: (id, updates) => {
-      let updatedBonsai: Bonsai | null = null;
-
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, id, (bonsai) => ({
-          ...bonsai,
-          ...updates,
-        }));
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
-      });
-
-      if (updatedBonsai) persistBonsai(updatedBonsai);
+      commitBonsaiUpdate(id, (bonsai) => ({ ...bonsai, ...updates }));
     },
 
     setCurrentBonsai: (id) => {
@@ -196,56 +260,67 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     },
 
     addPhoto: (bonsaiId, photoUri) => {
-      let updatedBonsai: Bonsai | null = null;
+      const photoEntry: PhotoHistoryEntry = {
+        id: generateId(),
+        uri: photoUri,
+        capturedAt: new Date().toISOString(),
+      };
+      const updatedBonsai = commitBonsaiUpdate(bonsaiId, (bonsai) => {
+        const shouldSetHero = !bonsai.heroPhoto;
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (bonsai) => ({
-            ...bonsai,
-            allPhotos: [...(bonsai.allPhotos ?? []), photoUri],
-            photoHistory: [
-              ...(bonsai.photoHistory ?? []),
-              {
-                id: generateId(),
-                uri: photoUri,
-                capturedAt: new Date().toISOString(),
-              },
-            ],
-            heroPhoto: bonsai.heroPhoto ?? photoUri,
-            timeline: appendTimelineEvent(bonsai.timeline, {
-              type: "scan",
-              title: "Foto agregada",
-              description: "Se agregó una foto al historial.",
-            }),
-          }));
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
+        return {
+          ...bonsai,
+          allPhotos: [...(bonsai.allPhotos ?? []), photoUri],
+          photoHistory: [...(bonsai.photoHistory ?? []), photoEntry],
+          heroPhoto: shouldSetHero ? photoUri : bonsai.heroPhoto,
+          timeline: appendTimelineEvent(bonsai.timeline, {
+            type: "scan",
+            title: "Foto agregada",
+            description: "Se agregó una foto al historial.",
+          }),
+        };
       });
 
-      if (updatedBonsai) persistBonsai(updatedBonsai);
+      if (updatedBonsai) {
+        syncUploadedPhotos(
+          bonsaiId,
+          [photoEntry],
+          updatedBonsai.heroPhoto === photoEntry.uri,
+        );
+      }
     },
 
     setHeroPhoto: (bonsaiId, photoUri) => {
-      let updatedBonsai: Bonsai | null = null;
+      const updatedBonsai = commitBonsaiUpdate(bonsaiId, (bonsai) => ({
+        ...bonsai,
+        heroPhoto: photoUri,
+        photoHistory: (bonsai.photoHistory ?? []).map((photo) => ({
+          ...photo,
+          isHero: photo.uri === photoUri || photo.downloadUrl === photoUri,
+        })),
+      }));
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (bonsai) => ({
-          ...bonsai,
-          heroPhoto: photoUri,
-        }));
-        updatedBonsai = result.updatedBonsai;
+      const userId = getAuthenticatedUserId(get().activeUserId);
+      const heroPhoto = updatedBonsai?.photoHistory.find(
+        (photo) => photo.uri === photoUri || photo.downloadUrl === photoUri,
+      );
 
-        return { bonsais: result.bonsais, syncError: null };
-      });
-
-      if (updatedBonsai) persistBonsai(updatedBonsai);
+      if (userId && heroPhoto) {
+        void setHeroPhotoMetadata(userId, bonsaiId, heroPhoto.id).catch(
+          (error) => {
+            setSyncError(
+              handleStorageError(error, "No se pudo marcar la portada."),
+            );
+          },
+        );
+      }
     },
 
     addScan: (bonsaiId, photoUris) => {
-      let updatedBonsai: Bonsai | null = null;
+      let photoEntriesToUpload: PhotoHistoryEntry[] = [];
+      let shouldUploadHero = false;
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
+      const updatedBonsai = commitBonsaiUpdate(bonsaiId, (b) => {
           const flat = Array.from(
             new Set(Array.isArray(photoUris) ? photoUris.flat() : [photoUris]),
           );
@@ -263,17 +338,18 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
           );
 
           if (!newUris.length) {
-            updatedBonsai = b;
             return b;
           }
 
+          photoEntriesToUpload = photoEntries;
+          shouldUploadHero = !b.heroPhoto;
           const timelineEntry = createTimelineEvent(
             "scan",
             "Nuevo escaneo de fotos",
             `${newUris.length} imágenes añadidas al historial de fotos.`,
           );
 
-          updatedBonsai = {
+          return {
             ...b,
             scanHistory: [...(b.scanHistory ?? []), newUris],
             allPhotos: [...(b.allPhotos ?? []), ...newUris],
@@ -281,16 +357,11 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
             heroPhoto: b.heroPhoto ?? newUris[0],
             timeline: [...(b.timeline ?? []), timelineEntry],
           };
-
-          return updatedBonsai;
-        });
-
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
       });
 
-      if (updatedBonsai) persistBonsai(updatedBonsai);
+      if (updatedBonsai && photoEntriesToUpload.length) {
+        syncUploadedPhotos(bonsaiId, photoEntriesToUpload, shouldUploadHero);
+      }
     },
 
     deletePhoto: (bonsaiId, photoId) => {
@@ -298,15 +369,17 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     },
 
     deletePhotos: (bonsaiId, photoIds) => {
-      let updatedBonsai: Bonsai | null = null;
+      let deletedPhotoEntries: PhotoHistoryEntry[] = [];
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
+      const updatedBonsai = commitBonsaiUpdate(bonsaiId, (b) => {
           const idsToDelete = new Set(photoIds);
+          deletedPhotoEntries = (b.photoHistory ?? []).filter((photo) =>
+            idsToDelete.has(photo.id),
+          );
           const urisToDelete = new Set(
-            (b.photoHistory ?? [])
-              .filter((photo) => idsToDelete.has(photo.id))
-              .map((photo) => photo.uri),
+            deletedPhotoEntries.flatMap((photo) =>
+              [photo.uri, photo.downloadUrl].filter(Boolean),
+            ),
           );
           const updatedPhotoHistory = (b.photoHistory ?? []).filter(
             (photo) => !idsToDelete.has(photo.id),
@@ -319,9 +392,9 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
             .filter((scan) => scan.length > 0);
           const updatedHeroPhoto = urisToDelete.has(b.heroPhoto ?? "")
             ? (updatedAllPhotos[0] ?? undefined)
-            : b.heroPhoto;
+              : b.heroPhoto;
 
-          updatedBonsai = {
+          return {
             ...b,
             photoHistory: updatedPhotoHistory,
             allPhotos: updatedAllPhotos,
@@ -333,225 +406,163 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
               description: `${photoIds.length} registro(s) de foto eliminados.`,
             }),
           };
-
-          return updatedBonsai;
-        });
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
       });
 
-      if (updatedBonsai) persistBonsai(updatedBonsai);
+      const userId = getAuthenticatedUserId(get().activeUserId);
+      if (userId && updatedBonsai) {
+        deletedPhotoEntries.forEach((photo) => {
+          void deleteBonsaiPhoto(userId, bonsaiId, photo).catch((error) => {
+            setSyncError(
+              handleStorageError(error, "No se pudo eliminar una foto."),
+            );
+          });
+        });
+      }
     },
 
     addTimelineEvent: (bonsaiId, event) => {
-      let updatedBonsai: Bonsai | null = null;
-
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (bonsai) => ({
-          ...bonsai,
-          timeline: appendTimelineEvent(bonsai.timeline, event),
-        }));
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
-      });
-
-      if (updatedBonsai) persistBonsai(updatedBonsai);
+      commitBonsaiUpdate(bonsaiId, (bonsai) => ({
+        ...bonsai,
+        timeline: appendTimelineEvent(bonsai.timeline, event),
+      }));
     },
 
     addSunExposureEvent: (bonsaiId, exposure) => {
-      let updatedBonsai: Bonsai | null = null;
+      commitBonsaiUpdate(bonsaiId, (b) => {
+        const exposureEvent: SunExposureEvent = {
+          id: generateId(),
+          date: exposure.date,
+          startTime: exposure.startTime,
+          endTime: exposure.endTime,
+          durationMinutes: exposure.durationMinutes,
+          temperature: exposure.temperature,
+          notes: exposure.notes,
+        };
+        const timelineEntry = createTimelineEvent(
+          "sunExposure",
+          "Exposición solar registrada",
+          exposure.notes || `Exposición de ${exposure.durationMinutes} min`,
+          exposure.date,
+          exposure.startTime,
+        );
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
-          const exposureEvent: SunExposureEvent = {
-            id: generateId(),
-            date: exposure.date,
-            startTime: exposure.startTime,
-            endTime: exposure.endTime,
-            durationMinutes: exposure.durationMinutes,
-            temperature: exposure.temperature,
-            notes: exposure.notes,
-          };
-          const timelineEntry: BonsaiTimelineEvent = {
-            id: generateId(),
-            date: exposure.date,
-            time: exposure.startTime,
-            type: "sunExposure",
-            title: "Exposición solar registrada",
-            description:
-              exposure.notes || `Exposición de ${exposure.durationMinutes} min`,
-          };
-
-          updatedBonsai = {
-            ...b,
-            sunExposureHistory: [
-              ...(b.sunExposureHistory ?? []),
-              exposureEvent,
-            ],
-            timeline: [...(b.timeline ?? []), timelineEntry],
-          };
-
-          return updatedBonsai;
-        });
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
+        return {
+          ...b,
+          sunExposureHistory: [...(b.sunExposureHistory ?? []), exposureEvent],
+          timeline: [...(b.timeline ?? []), timelineEntry],
+        };
       });
-
-      if (updatedBonsai) persistBonsai(updatedBonsai);
     },
 
     water: (bonsaiId, intensity = 1) => {
-      let updatedBonsai: Bonsai | null = null;
       const now = new Date();
       const today = getLocalDateString(now);
       const time = getLocalTimeString(now);
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
-          const history: WateringEvent[] = b.wateringHistory ?? [];
-          const already = history.some(
-            (w) => w.date === today && w.type === "water",
-          );
+      commitBonsaiUpdate(bonsaiId, (b) => {
+        const history: WateringEvent[] = b.wateringHistory ?? [];
+        const already = history.some(
+          (w) => w.date === today && w.type === "water",
+        );
 
-          if (already) {
-            updatedBonsai = b;
-            return b;
-          }
+        if (already) return b;
 
-          const newEvent: WateringEvent = {
-            date: today,
-            time,
-            type: "water",
-            intensity,
-          };
-          const timelineEvent = createTimelineEvent(
-            "water",
-            "Riego registrado",
-            `Riego con intensidad ${intensity}`,
-          );
+        const newEvent: WateringEvent = {
+          date: today,
+          time,
+          type: "water",
+          intensity,
+        };
+        const timelineEvent = createTimelineEvent(
+          "water",
+          "Riego registrado",
+          `Riego con intensidad ${intensity}`,
+          today,
+          time,
+        );
 
-          updatedBonsai = {
-            ...b,
-            lastWatering: toLocalDateTimeIso(newEvent.date, newEvent.time),
-            daily: (b.daily ?? 0) + 1,
-            monthly: (b.monthly ?? 0) + 1,
-            yearly: (b.yearly ?? 0) + 1,
-            wateringHistory: [...history, newEvent],
-            timeline: [...(b.timeline ?? []), timelineEvent],
-          };
-
-          return updatedBonsai;
-        });
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
+        return {
+          ...b,
+          lastWatering: toLocalDateTimeIso(newEvent.date, newEvent.time),
+          daily: (b.daily ?? 0) + 1,
+          monthly: (b.monthly ?? 0) + 1,
+          yearly: (b.yearly ?? 0) + 1,
+          wateringHistory: [...history, newEvent],
+          timeline: [...(b.timeline ?? []), timelineEvent],
+        };
       });
-
-      if (updatedBonsai) persistBonsai(updatedBonsai);
     },
 
     recordWateringEvent: (bonsaiId, event) => {
-      let updatedBonsai: Bonsai | null = null;
+      commitBonsaiUpdate(bonsaiId, (b) => {
+        const history = b.wateringHistory ?? [];
+        const eventTime = event.time ?? getLocalTimeString();
+        const newEvent: WateringEvent = {
+          date: event.date,
+          type: event.type,
+          intensity: event.intensity,
+          notes: event.notes,
+          time: eventTime,
+        };
+        const updatedHistory = [...history, newEvent];
+        const counters = getWateringCounters(updatedHistory);
+        const timelineEvent = createTimelineEvent(
+          event.type,
+          event.type === "water" ? "Riego registrado" : `Evento: ${event.type}`,
+          event.notes,
+          event.date,
+          eventTime,
+        );
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
-          const history = b.wateringHistory ?? [];
-          const eventTime = event.time ?? getLocalTimeString();
-          const newEvent: WateringEvent = {
-            date: event.date,
-            type: event.type,
-            intensity: event.intensity,
-            notes: event.notes,
-            time: eventTime,
-          };
-          const updatedHistory = [...history, newEvent];
-          const counters = getWateringCounters(updatedHistory);
-          const timelineEvent: BonsaiTimelineEvent = {
-            id: generateId(),
-            date: event.date,
-            time: eventTime,
-            type: event.type,
-            title:
-              event.type === "water"
-                ? "Riego registrado"
-                : `Evento: ${event.type}`,
-            description: event.notes,
-          };
-
-          updatedBonsai = {
-            ...b,
-            wateringHistory: updatedHistory,
-            lastWatering:
-              event.type === "water"
-                ? toLocalDateTimeIso(event.date, eventTime)
-                : b.lastWatering,
-            ...counters,
-            timeline: [...(b.timeline ?? []), timelineEvent],
-          };
-
-          return updatedBonsai;
-        });
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
+        return {
+          ...b,
+          wateringHistory: updatedHistory,
+          lastWatering:
+            event.type === "water"
+              ? toLocalDateTimeIso(event.date, eventTime)
+              : b.lastWatering,
+          ...counters,
+          timeline: [...(b.timeline ?? []), timelineEvent],
+        };
       });
-
-      if (updatedBonsai) persistBonsai(updatedBonsai);
     },
 
     undoLastWatering: (bonsaiId) => {
-      let updatedBonsai: Bonsai | null = null;
+      commitBonsaiUpdate(bonsaiId, (b) => {
+        const history = b.wateringHistory ?? [];
+        const mostRecentIndex = [...history]
+          .reverse()
+          .findIndex((event) => event.type === "water");
 
-      set((state) => {
-        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
-          const history = b.wateringHistory ?? [];
-          const mostRecentIndex = [...history]
-            .reverse()
-            .findIndex((event) => event.type === "water");
+        if (mostRecentIndex === -1) return b;
 
-          if (mostRecentIndex === -1) {
-            updatedBonsai = b;
-            return b;
-          }
+        const removeIndex = history.length - 1 - mostRecentIndex;
+        const newHistory = [...history];
+        newHistory.splice(removeIndex, 1);
 
-          const removeIndex = history.length - 1 - mostRecentIndex;
-          const newHistory = [...history];
-          newHistory.splice(removeIndex, 1);
+        const counters = getWateringCounters(newHistory);
+        const lastWateringEvent = [...newHistory]
+          .reverse()
+          .find((event) => event.type === "water");
+        const timelineEntry = createTimelineEvent(
+          "note",
+          "Riego deshecho",
+          "Se ha eliminado el último riego registrado.",
+        );
 
-          const counters = getWateringCounters(newHistory);
-          const lastWateringEvent = [...newHistory]
-            .reverse()
-            .find((event) => event.type === "water");
-          const timelineEntry = createTimelineEvent(
-            "note",
-            "Riego deshecho",
-            "Se ha eliminado el último riego registrado.",
-          );
-
-          updatedBonsai = {
-            ...b,
-            wateringHistory: newHistory,
-            lastWatering: lastWateringEvent
-              ? toLocalDateTimeIso(
-                  lastWateringEvent.date,
-                  lastWateringEvent.time,
-                )
-              : null,
-            ...counters,
-            timeline: [...(b.timeline ?? []), timelineEntry],
-          };
-
-          return updatedBonsai;
-        });
-        updatedBonsai = result.updatedBonsai;
-
-        return { bonsais: result.bonsais, syncError: null };
+        return {
+          ...b,
+          wateringHistory: newHistory,
+          lastWatering: lastWateringEvent
+            ? toLocalDateTimeIso(
+                lastWateringEvent.date,
+                lastWateringEvent.time,
+              )
+            : null,
+          ...counters,
+          timeline: [...(b.timeline ?? []), timelineEntry],
+        };
       });
-
-      if (updatedBonsai) persistBonsai(updatedBonsai);
     },
 
     importBonsais: (bonsais) => {
