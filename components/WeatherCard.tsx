@@ -6,8 +6,6 @@ import {
     View,
 } from "react-native";
 
-import * as Location from "expo-location";
-
 import {
     Cloud,
     CloudRain,
@@ -18,33 +16,22 @@ import {
 
 import { GLOBAL_STYLES } from "@/constants/styles";
 import { THEME } from "@/constants/theme";
+import { getWeather, type WeatherSnapshot } from "@/services/weather";
 
-export default function WeatherCard({ onWeather }: any) {
-    const [weather, setWeather] = useState<any>(null);
+type WeatherCardProps = {
+    onWeather?: (weather: WeatherSnapshot) => void;
+};
+
+export default function WeatherCard({ onWeather }: WeatherCardProps) {
+    const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
 
     const loadWeather = useCallback(async () => {
         try {
-            const permission =
-                await Location.requestForegroundPermissionsAsync();
-
-            if (permission.status !== "granted") return;
-
-            const location =
-                await Location.getCurrentPositionAsync({});
-
-            const { latitude, longitude } =
-                location.coords;
-
-            const response = await fetch(
-                `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`
-            );
-
-            const data = await response.json();
-
-            setWeather(data.current);
-            onWeather?.(data.current);
+            const snapshot = await getWeather();
+            setWeather(snapshot);
+            onWeather?.(snapshot);
         } catch (error) {
-            console.log(error);
+            console.error("Weather load error:", error);
         }
     }, [onWeather]);
 
@@ -102,7 +89,7 @@ export default function WeatherCard({ onWeather }: any) {
     }
 
     const weatherInfo =
-        getWeatherInfo(weather.weather_code);
+        getWeatherInfo(weather.weatherCode ?? 0);
 
     return (
         <View style={[GLOBAL_STYLES.card, styles.card]}>
@@ -123,7 +110,7 @@ export default function WeatherCard({ onWeather }: any) {
 
                 <Text style={styles.temp}>
                     {Math.round(
-                        weather.temperature_2m
+                        weather.temperature
                     )}°
                 </Text>
             </View>
@@ -140,7 +127,7 @@ export default function WeatherCard({ onWeather }: any) {
                     </Text>
 
                     <Text style={styles.statValue}>
-                        {weather.relative_humidity_2m}%
+                        {weather.humidity}%
                     </Text>
                 </View>
 
@@ -155,7 +142,22 @@ export default function WeatherCard({ onWeather }: any) {
                     </Text>
 
                     <Text style={styles.statValue}>
-                        {weather.wind_speed_10m} km/h
+                        {weather.windSpeed ?? 0} km/h
+                    </Text>
+                </View>
+
+                <View style={styles.statItem}>
+                    <CloudRain
+                        size={18}
+                        color={THEME.colors.primary}
+                    />
+
+                    <Text style={styles.statLabel}>
+                        Lluvia
+                    </Text>
+
+                    <Text style={styles.statValue}>
+                        {weather.rainProbability}%
                     </Text>
                 </View>
             </View>

@@ -45,6 +45,9 @@ export interface PhotoHistoryEntry {
   capturedAt: string;
   label?: string;
   scanId?: string;
+  storagePath?: string;
+  downloadUrl?: string;
+  isHero?: boolean;
 }
 
 export interface SunExposureEvent {

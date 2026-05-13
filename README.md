@@ -1,55 +1,90 @@
-<<<<<<< HEAD
-# Welcome to your Expo app 👋
+# Bonsai Care App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Bitácora inteligente para cuidar bonsáis desde Expo y React Native. La app permite registrar una colección de árboles, sincronizar datos con Firebase, dar seguimiento a riegos, fotos, salud, exposición solar y eventos importantes.
 
-## Get started
+## Funciones principales
 
-1. Install dependencies
+- Colección de bonsáis con estado, especie, fotos y actividad reciente.
+- Sincronización en tiempo real con Firebase Auth y Firestore.
+- Estructura Firestore por usuario: `users/{userId}/bonsais/{bonsaiId}`.
+- Migración inicial de datos locales hacia Firebase cuando el usuario inicia sesión.
+- Registro manual de riego con fecha, hora y notas.
+- Galería de revisión para conservar, eliminar o marcar portada.
+- Timeline centralizado para eventos de riego, fotos, sol, poda, trasplante y notas.
+- Detección de especie por foto usando Plant.id.
+- Clima local como contexto para recomendaciones de cuidado.
 
-   ```bash
-   npm install
-   ```
+## Stack
 
-2. Start the app
+- Expo SDK 54
+- React 19
+- React Native 0.81
+- Expo Router
+- TypeScript strict
+- Firebase modular SDK
+- Zustand como cache/UI state
 
-   ```bash
-   npx expo start
-   ```
+## Configuración
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+1. Instala dependencias:
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+2. Crea tu archivo `.env` a partir de `.env.example`:
 
-## Learn more
+```bash
+cp .env.example .env
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+3. Completa las variables Firebase y Plant.id.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Scripts útiles
 
-## Join the community
+Expo Go:
 
-Join our community of developers creating universal apps.
+```bash
+npm run start:go
+npm run start:go:lan
+npm run start:go:tunnel
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
-=======
-# bonsaiapp
-🌱 Aplicación para el cuidado y gestión de bonsáis. Permite registrar árboles, programar recordatorios de riego, poda y fertilización, monitorear condiciones ambientales y llevar seguimiento del crecimiento mediante historial y fotografías. Diseñada para aficionados y expertos en bonsái.
->>>>>>> 5e99b475a597feb3c15f9ebf4199ca9024bf6565
+Development build:
+
+```bash
+npm run start:dev
+npm run start:dev:lan
+npm run start:dev:tunnel
+```
+
+Web:
+
+```bash
+npm run web
+```
+
+Validación:
+
+```bash
+npx tsc --noEmit
+npm run lint
+```
+
+## Firebase
+
+La app usa Firebase como fuente principal de datos persistentes. Los datos importantes se sincronizan desde Firestore y el store local mantiene cache y estado de UI.
+
+Estructura base:
+
+```text
+users/{userId}
+users/{userId}/bonsais/{bonsaiId}
+users/{userId}/bonsais/{bonsaiId}/photos/{photoId}
+```
+
+## Notas de desarrollo
+
+- No guardes secretos reales en Git. Usa `.env` local y conserva `.env.example` sin valores.
+- Expo Go tiene limitaciones para notificaciones push en Android con SDK modernos; para funciones nativas completas usa development build.
+- El timeline debe ser la fuente visual principal para calendario e historial.

@@ -4,8 +4,12 @@ import { auth } from "@/services/firebase";
 import {
   deleteBonsai as deleteRemoteBonsai,
   upsertBonsai,
-} from "@/services/firebaseBonsaiService";
-import { updateUserSettings } from "@/services/firebaseUserService";
+} from "@/services/firebase/bonsais";
+import { updateUserSettings } from "@/services/firebase/users";
+import {
+  handleFirebaseError,
+} from "@/services/firebase/utils";
+import { updateBonsaiById } from "@/store/actions/helpers";
 import {
   getCurrentBonsaiIdFromStorage,
   saveCurrentBonsaiIdToStorage,
@@ -15,6 +19,7 @@ import {
   getLocalTimeString,
   toLocalDateTimeIso,
 } from "@/utils/dateTime";
+import { appendTimelineEvent, createTimelineEvent } from "@/utils/timeline";
 import type {
   Bonsai,
   BonsaiStoreState,
@@ -37,22 +42,6 @@ const emptyBonsaiState = {
   monthly: 0,
   yearly: 0,
 };
-
-function createTimelineEvent(
-  type: BonsaiTimelineEvent["type"],
-  title: string,
-  description?: string,
-): BonsaiTimelineEvent {
-  const now = new Date();
-  return {
-    id: generateId(),
-    date: getLocalDateString(now),
-    time: getLocalTimeString(now),
-    type,
-    title,
-    description,
-  };
-}
 
 function getAuthenticatedUserId(stateUserId?: string | null) {
   return stateUserId ?? auth.currentUser?.uid ?? null;
@@ -90,8 +79,12 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     }
 
     void upsertBonsai(userId, bonsai).catch((error) => {
-      console.error("Firestore upsert bonsai error:", error);
-      setSyncError("No se pudo sincronizar el bonsái con Firebase.");
+      setSyncError(
+        handleFirebaseError(
+          error,
+          "No se pudo sincronizar el bonsái con Firebase.",
+        ),
+      );
     });
   };
 
@@ -103,8 +96,9 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
 
     void updateUserSettings(userId, { currentBonsaiId: bonsaiId }).catch(
       (error) => {
-        console.error("Firestore update user settings error:", error);
-        setSyncError("No se pudo guardar la selección actual.");
+        setSyncError(
+          handleFirebaseError(error, "No se pudo guardar la selección actual."),
+        );
       },
     );
   };
@@ -173,14 +167,15 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     updateBonsai: (id, updates) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== id) return b;
-          updatedBonsai = { ...b, ...updates };
-          return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, id, (bonsai) => ({
+          ...bonsai,
+          ...updates,
+        }));
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -203,27 +198,29 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     addPhoto: (bonsaiId, photoUri) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-
-          updatedBonsai = {
-            ...b,
-            allPhotos: [...(b.allPhotos ?? []), photoUri],
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (bonsai) => ({
+            ...bonsai,
+            allPhotos: [...(bonsai.allPhotos ?? []), photoUri],
             photoHistory: [
-              ...(b.photoHistory ?? []),
+              ...(bonsai.photoHistory ?? []),
               {
                 id: generateId(),
                 uri: photoUri,
                 capturedAt: new Date().toISOString(),
               },
             ],
-          };
+            heroPhoto: bonsai.heroPhoto ?? photoUri,
+            timeline: appendTimelineEvent(bonsai.timeline, {
+              type: "scan",
+              title: "Foto agregada",
+              description: "Se agregó una foto al historial.",
+            }),
+          }));
+        updatedBonsai = result.updatedBonsai;
 
-          return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -231,14 +228,15 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     setHeroPhoto: (bonsaiId, photoUri) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-          updatedBonsai = { ...b, heroPhoto: photoUri };
-          return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (bonsai) => ({
+          ...bonsai,
+          heroPhoto: photoUri,
+        }));
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -246,10 +244,8 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     addScan: (bonsaiId, photoUris) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
           const flat = Array.from(
             new Set(Array.isArray(photoUris) ? photoUris.flat() : [photoUris]),
           );
@@ -287,9 +283,12 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
           };
 
           return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        });
+
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -301,10 +300,8 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     deletePhotos: (bonsaiId, photoIds) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
           const idsToDelete = new Set(photoIds);
           const urisToDelete = new Set(
             (b.photoHistory ?? [])
@@ -330,12 +327,19 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
             allPhotos: updatedAllPhotos,
             scanHistory: updatedScanHistory,
             heroPhoto: updatedHeroPhoto,
+            timeline: appendTimelineEvent(b.timeline, {
+              type: "note",
+              title: "Fotos eliminadas",
+              description: `${photoIds.length} registro(s) de foto eliminados.`,
+            }),
           };
 
           return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        });
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -343,28 +347,15 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     addTimelineEvent: (bonsaiId, event) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (bonsai) => ({
+          ...bonsai,
+          timeline: appendTimelineEvent(bonsai.timeline, event),
+        }));
+        updatedBonsai = result.updatedBonsai;
 
-          const newEvent: BonsaiTimelineEvent = {
-            id: generateId(),
-            date: event.date,
-            time: event.time,
-            type: event.type,
-            title: event.title,
-            description: event.description,
-          };
-
-          updatedBonsai = {
-            ...b,
-            timeline: [...(b.timeline ?? []), newEvent],
-          };
-
-          return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -372,10 +363,8 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     addSunExposureEvent: (bonsaiId, exposure) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
           const exposureEvent: SunExposureEvent = {
             id: generateId(),
             date: exposure.date,
@@ -405,9 +394,11 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
           };
 
           return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        });
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -418,10 +409,8 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
       const today = getLocalDateString(now);
       const time = getLocalTimeString(now);
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
           const history: WateringEvent[] = b.wateringHistory ?? [];
           const already = history.some(
             (w) => w.date === today && w.type === "water",
@@ -455,9 +444,11 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
           };
 
           return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        });
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -465,10 +456,8 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     recordWateringEvent: (bonsaiId, event) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
           const history = b.wateringHistory ?? [];
           const eventTime = event.time ?? getLocalTimeString();
           const newEvent: WateringEvent = {
@@ -504,9 +493,11 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
           };
 
           return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        });
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },
@@ -514,10 +505,8 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
     undoLastWatering: (bonsaiId) => {
       let updatedBonsai: Bonsai | null = null;
 
-      set((state) => ({
-        bonsais: state.bonsais.map((b) => {
-          if (b.id !== bonsaiId) return b;
-
+      set((state) => {
+        const result = updateBonsaiById(state.bonsais, bonsaiId, (b) => {
           const history = b.wateringHistory ?? [];
           const mostRecentIndex = [...history]
             .reverse()
@@ -556,9 +545,11 @@ export const useBonsaiStore = create<BonsaiStoreState>((set, get) => {
           };
 
           return updatedBonsai;
-        }),
-        syncError: null,
-      }));
+        });
+        updatedBonsai = result.updatedBonsai;
+
+        return { bonsais: result.bonsais, syncError: null };
+      });
 
       if (updatedBonsai) persistBonsai(updatedBonsai);
     },

@@ -5,8 +5,9 @@ import {
   getUserBonsais,
   replaceUserBonsais,
   subscribeToUserBonsais,
-} from "@/services/firebaseBonsaiService";
-import { upsertUserProfile } from "@/services/firebaseUserService";
+} from "@/services/firebase/bonsais";
+import { handleSyncError } from "@/services/firebase/utils";
+import { upsertUserProfile } from "@/services/firebase/users";
 import { useBonsaiStore } from "@/store/bonsaiStore";
 import { loadBonsaisFromStorage } from "@/utils/storageService";
 
@@ -56,18 +57,22 @@ export function useFirebaseSync() {
             useBonsaiStore.getState().hydrateFromRemote(bonsais);
           },
           (error) => {
-            console.error("Firestore realtime bonsais error:", error);
             useBonsaiStore.getState().setSyncState({
               isSyncing: false,
-              syncError: "No se pudo escuchar cambios en tiempo real.",
+              syncError: handleSyncError(
+                error,
+                "No se pudo escuchar cambios en tiempo real.",
+              ),
             });
           },
         );
       } catch (error) {
-        console.error("Firebase sync bootstrap error:", error);
         useBonsaiStore.getState().setSyncState({
           isSyncing: false,
-          syncError: "No se pudo inicializar la sincronización.",
+          syncError: handleSyncError(
+            error,
+            "No se pudo inicializar la sincronización.",
+          ),
         });
       }
     });

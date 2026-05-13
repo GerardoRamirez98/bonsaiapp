@@ -7,17 +7,6 @@ import { THEME } from "@/constants/theme";
 import { useBonsaiStore } from "@/store/bonsaiStore";
 import { getLocalDateString } from "@/utils/dateTime";
 
-const EVENT_LABELS: Record<string, string> = {
-  water: "Riego",
-  fertilizer: "Fertilizante",
-  prune: "Poda",
-  repot: "Trasplante",
-  wire: "Alambrado",
-  scan: "Escaneo",
-  sunExposure: "Exposición solar",
-  note: "Nota",
-};
-
 export default function CalendarScreen() {
   const currentBonsai = useBonsaiStore((state) =>
     state.bonsais.find((b) => b.id === state.currentBonsaiId),
@@ -27,37 +16,10 @@ export default function CalendarScreen() {
     getLocalDateString(),
   );
 
-  const timelineEvents = useMemo(() => {
-    if (!currentBonsai) return [];
-
-    const waterEvents = (currentBonsai.wateringHistory ?? []).map(
-      (event, index) => ({
-        id: `${event.type}-${event.date}-${event.intensity ?? 0}-${index}`,
-        date: event.date,
-        time: event.time ?? "--:--",
-        type: event.type,
-        title: EVENT_LABELS[event.type] || "Riego",
-        description: event.notes || `Intensidad ${event.intensity ?? 1}`,
-      }),
-    );
-
-    const exposureEvents = (currentBonsai.sunExposureHistory ?? []).map(
-      (event, index) => ({
-        id: `${event.id}-${index}`,
-        date: event.date,
-        time: event.startTime,
-        type: "sunExposure",
-        title: EVENT_LABELS.sunExposure,
-        description: `${event.durationMinutes} min al sol${event.temperature ? ` a ${event.temperature}°` : ""}`,
-      }),
-    );
-
-    return [
-      ...waterEvents,
-      ...exposureEvents,
-      ...(currentBonsai.timeline ?? []),
-    ];
-  }, [currentBonsai]);
+  const timelineEvents = useMemo(
+    () => currentBonsai?.timeline ?? [],
+    [currentBonsai?.timeline],
+  );
 
   const markedDates = useMemo(() => {
     return timelineEvents.reduce((acc: Record<string, any>, event) => {
